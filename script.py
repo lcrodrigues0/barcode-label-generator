@@ -3,28 +3,29 @@ import csv
 from barcode.writer import ImageWriter
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import A4
+import os
 
 
 # Configuração de layout
 largura_pagina, altura_pagina = A4
 
-altura_imagem = 2 * 28.35 - 5
-largura_imagem = 4.5 * 28.35 - 25
+altura_imagem = 1.5 * 28.35
+largura_imagem = 5 * 28.35
 
-margem_esquerda = 40
+margem_esquerda = 7.5
 margem_direita = largura_pagina - 100
 
 margem_superior = altura_pagina - 100
 margem_inferior = 0
 
 espaco_vertical = 100  # Espaço entre os códigos de barras na vertical
-espaco_horizontal = largura_imagem + 30  # Espaço entre os códigos de barras na horizontal
+espaco_horizontal = largura_imagem + 5  # Espaço entre os códigos de barras na horizontal
 
 # Entrada
 nome_arquivo_csv = "codigos.csv"
 nome_do_pdf = "codigos_barras.pdf"
 font_type = "Helvetica-Bold" 
-font_size = 11
+font_size = 10
 nome_do_orgao = "MTE - SRTE/ES"
 
 # Criar o PDF
@@ -34,6 +35,11 @@ c.setFont(font_type, font_size)
 
 y = margem_superior
 x = margem_esquerda
+
+# Configura o writer para não escrever o texto
+options = {
+    "write_text": False  # 👈 remove o número embaixo
+}
 
 # Lê os códigos do arquivo CSV
 # Abre o CSV e lê cada linha
@@ -52,14 +58,30 @@ with open('codigos.csv', newline='') as csvfile:
         # Gerar imagem temporária do código
         codigo = barcode.get("code128", codigo_num, writer=ImageWriter())
         img_filename = f"tmp_{codigo_num}"
-        codigo.save(img_filename)
+        codigo.save(img_filename, options)
 
         print(img_filename)
 
+        largura_string_codigo = c.stringWidth(codigo_num, font_type, font_size)
+        largura_string_orgao = c.stringWidth(nome_do_orgao, font_type, font_size)
+
+        mt = altura_imagem + 4
+        mo = (largura_imagem - largura_string_orgao)/2
+        mc = (largura_imagem - largura_string_codigo)/2
+        mb = -10
+
         # Escrever o nome do órgão
-        c.drawString(x + 12, y + altura_imagem + 4, nome_do_orgao)
+        c.drawString(x + mo, y + mt, nome_do_orgao)
         # Desenhar o código no PDF
         c.drawImage(f'{img_filename}.png', x, y, width=largura_imagem, height=altura_imagem)
+        # Escrever numero do codigo
+        c.drawString(x + mc, y + mb, codigo_num)
+
+        if os.path.exists(f"{img_filename}.png"):
+            os.remove(f"{img_filename}.png")
+            # print("Arquivo excluído com sucesso!")
+        else:
+            print("O arquivo não existe.")
 
         x += espaco_horizontal
 
