@@ -9,23 +9,23 @@ import os
 # Configuração de layout
 largura_pagina, altura_pagina = A4
 
-altura_imagem = 1.5 * 28.35
-largura_imagem = 5 * 28.35
+altura_imagem = 0.8*(1.5 * 28.35)
+largura_imagem = 0.8*(5 * 28.35)
 
 margem_esquerda = 7.5
 margem_direita = largura_pagina - 100
 
-margem_superior = altura_pagina - 100
+margem_superior = altura_pagina - 80
 margem_inferior = 0
 
-espaco_vertical = 100  # Espaço entre os códigos de barras na vertical
+espaco_vertical = 80  # Espaço entre os códigos de barras na vertical
 espaco_horizontal = largura_imagem + 5  # Espaço entre os códigos de barras na horizontal
 
 # Entrada
 nome_arquivo_csv = "codigos.csv"
 nome_do_pdf = "codigos_barras.pdf"
 font_type = "Helvetica-Bold" 
-font_size = 10
+font_size = 0.8*10
 nome_do_orgao = "MTE - SRTE/ES"
 
 # Criar o PDF
