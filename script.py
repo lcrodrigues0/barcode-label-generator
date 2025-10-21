@@ -9,7 +9,7 @@ import os
 # Configuração de layout
 largura_pagina, altura_pagina = A4
 
-altura_imagem = 0.8*(1.5 * 28.35)
+altura_imagem = 0.65*(1.5 * 28.35)
 largura_imagem = 0.8*(5 * 28.35)
 
 margem_esquerda = 7.5
@@ -22,7 +22,7 @@ espaco_vertical = 80  # Espaço entre os códigos de barras na vertical
 espaco_horizontal = largura_imagem + 5  # Espaço entre os códigos de barras na horizontal
 
 # Entrada
-nome_arquivo_csv = "codigos.csv"
+nome_arquivo_csv = "codigos-oficiais.csv"
 nome_do_pdf = "codigos_barras.pdf"
 font_type = "Helvetica-Bold" 
 font_size = 0.8*10
@@ -43,7 +43,7 @@ options = {
 
 # Lê os códigos do arquivo CSV
 # Abre o CSV e lê cada linha
-with open('codigos.csv', newline='') as csvfile:
+with open(nome_arquivo_csv, newline='') as csvfile:
     leitor = csv.reader(csvfile)
 
     for linha in leitor:
