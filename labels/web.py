@@ -7,6 +7,7 @@ from flask import Flask, jsonify, render_template, request, send_file
 from labels.gerador import (
     FORMATOS_PLANILHA,
     MAX_ORGAO,
+    MAX_TAMANHO_CODIGO,
     ORGAO_PADRAO,
     contar_paginas,
     gerar_codigos_intervalo,
@@ -21,6 +22,36 @@ _TOKEN_VALIDO = re.compile(r"[A-Za-z0-9_-]{1,64}")
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = MAX_PLANILHA_MB * 1024 * 1024
+
+# Política de conteúdo das páginas HTML: só recursos do próprio app, mais as fontes
+# do Google Fonts usadas no template. Não vale para o PDF (o leitor de PDF do
+# navegador poderia deixar de abri-lo no iframe da prévia).
+_CSP_HTML = "; ".join(
+    [
+        "default-src 'self'",
+        "script-src 'self'",
+        "style-src 'self' https://fonts.googleapis.com",
+        "font-src https://fonts.gstatic.com",
+        "img-src 'self' data:",
+        "connect-src 'self'",
+        "frame-src 'self'",
+        "object-src 'none'",
+        "base-uri 'self'",
+        "form-action 'self'",
+        "frame-ancestors 'self'",
+    ]
+)
+
+
+@app.after_request
+def cabecalhos_de_seguranca(resposta):
+    resposta.headers.setdefault("X-Content-Type-Options", "nosniff")
+    resposta.headers.setdefault("Referrer-Policy", "same-origin")
+    # SAMEORIGIN (e não DENY): a prévia é um iframe do próprio app.
+    resposta.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
+    if resposta.mimetype == "text/html":
+        resposta.headers.setdefault("Content-Security-Policy", _CSP_HTML)
+    return resposta
 
 
 def _nome_base_planilha(nome_arquivo):
@@ -64,6 +95,7 @@ def _pagina(erro=None, status=200, ler_formulario=True):
         "index.html",
         orgao_padrao=form.get("orgao", ORGAO_PADRAO).strip(),
         max_orgao=MAX_ORGAO,
+        max_digitos=MAX_TAMANHO_CODIGO,
         formatos=",".join(FORMATOS_PLANILHA),
         inicio=form.get("inicio", "").strip(),
         fim=form.get("fim", "").strip(),

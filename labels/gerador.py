@@ -33,6 +33,7 @@ PDF_PADRAO = str(RAIZ_PROJETO / "output" / "codigos_barras.pdf")
 ORGAO_PADRAO = "MTE - SRTE/ES"
 MAX_CODIGOS = 10_000
 MAX_ORGAO = 40
+MAX_TAMANHO_CODIGO = 40  # caracteres por código (planilha) ou dígitos (intervalo)
 
 
 # --------------------------------------------------------------------------
@@ -40,7 +41,10 @@ MAX_ORGAO = 40
 # --------------------------------------------------------------------------
 
 FORMATOS_PLANILHA = (".csv", ".txt", ".xlsx", ".ods")
-MAX_TAMANHO_CODIGO = 40
+# XLSX e ODS são arquivos ZIP. Um arquivo pequeno pode se expandir para centenas de MB
+# ao ser descompactado ("zip bomb"); por isso o tamanho descompactado é limitado antes
+# de abrir o conteúdo. 10.000 códigos ocupam cerca de 2 MB descompactados.
+MAX_DESCOMPACTADO_MB = 10
 
 _NS_ODS = {
     "office": "urn:oasis:names:tc:opendocument:xmlns:office:1.0",
@@ -84,44 +88,85 @@ def _linhas_xlsx(conteudo):
         livro.close()
 
 
+def _verificar_tamanho_descompactado(conteudo):
+    """Recusa ZIPs (XLSX/ODS) que ficariam grandes demais ao descompactar.
+
+    O zipfile do Python não entrega mais bytes do que o tamanho declarado de cada
+    arquivo interno, então somar os tamanhos declarados é suficiente.
+    """
+    import zipfile
+
+    try:
+        with zipfile.ZipFile(BytesIO(conteudo)) as arquivo:
+            total = sum(item.file_size for item in arquivo.infolist())
+    except zipfile.BadZipFile as erro:
+        raise ValueError(
+            "Não foi possível ler a planilha. Verifique se o arquivo não está corrompido."
+        ) from erro
+    if total > MAX_DESCOMPACTADO_MB * 1024 * 1024:
+        raise ValueError(
+            "A planilha é grande demais depois de descompactada "
+            f"(máximo de {MAX_DESCOMPACTADO_MB} MB). Remova linhas ou colunas que não são usadas."
+        )
+
+
 def _linhas_ods(conteudo):
+    """Lê a 1ª coluna da 1ª tabela do ODS em fluxo (sem montar o XML inteiro na memória)."""
     import xml.etree.ElementTree as ET
     import zipfile
 
-    with zipfile.ZipFile(BytesIO(conteudo)) as arquivo:
-        raiz = ET.fromstring(arquivo.read("content.xml"))
-
-    tabela = raiz.find(".//table:table", _NS_ODS)
-    if tabela is None:
-        return
     t = "{%s}" % _NS_ODS["table"]
     o = "{%s}" % _NS_ODS["office"]
-    for linha in tabela.iter(f"{t}table-row"):
-        celula = next(
-            (c for c in linha if c.tag in (f"{t}table-cell", f"{t}covered-table-cell")),
-            None,
-        )
-        valor = None
-        if celula is not None:
-            if celula.get(f"{o}value-type") in _TIPOS_NUMERICOS_ODS:
-                valor = float(celula.get(f"{o}value"))
-            else:
-                valor = "".join(celula.itertext())
-        # Linhas repetidas: o LibreOffice grava as linhas vazias do fim assim.
-        repeticoes = int(linha.get(f"{t}number-rows-repeated", "1"))
-        if not _normalizar_valor(valor):
-            repeticoes = 1
-        for _ in range(min(repeticoes, MAX_CODIGOS + 1)):
-            yield valor
+    tag_tabela, tag_linha = f"{t}table", f"{t}table-row"
+    tags_celula = (f"{t}table-cell", f"{t}covered-table-cell")
+
+    with zipfile.ZipFile(BytesIO(conteudo)) as arquivo, arquivo.open("content.xml") as xml:
+        tabela = None
+        for evento, elemento in ET.iterparse(xml, events=("start", "end")):
+            if evento == "start":
+                if elemento.tag == tag_tabela and tabela is None:
+                    tabela = elemento
+                continue
+            if elemento is tabela:
+                return  # só a primeira tabela (aba)
+            if tabela is None or elemento.tag != tag_linha:
+                continue
+
+            celula = next((c for c in elemento if c.tag in tags_celula), None)
+            valor = None
+            if celula is not None:
+                if celula.get(f"{o}value-type") in _TIPOS_NUMERICOS_ODS:
+                    valor = float(celula.get(f"{o}value"))
+                else:
+                    valor = "".join(celula.itertext())
+            # Linhas repetidas: o LibreOffice grava as linhas vazias do fim assim.
+            repeticoes = int(elemento.get(f"{t}number-rows-repeated", "1"))
+            if not _normalizar_valor(valor):
+                repeticoes = 1
+            # Libera as linhas já lidas (mantém a memória constante).
+            tabela.clear()
+            for _ in range(min(repeticoes, MAX_CODIGOS + 2)):
+                yield valor
 
 
-def _validar_codigos(valores):
-    """Recebe os valores da 1ª coluna, linha a linha, e devolve os códigos válidos."""
-    linhas = [
-        (numero, texto)
-        for numero, texto in enumerate((_normalizar_valor(v) for v in valores), start=1)
-        if texto
-    ]
+def _coletar_linhas(valores):
+    """(número da linha, texto) das linhas preenchidas, parando logo após o limite.
+
+    Para cedo de propósito: com o cabeçalho, até MAX_CODIGOS + 1 linhas são válidas;
+    qualquer coisa além disso já basta para recusar a planilha.
+    """
+    linhas = []
+    for numero, valor in enumerate(valores, start=1):
+        texto = _normalizar_valor(valor)
+        if texto:
+            linhas.append((numero, texto))
+            if len(linhas) > MAX_CODIGOS + 1:
+                break
+    return linhas
+
+
+def _validar_codigos(linhas):
+    """Recebe (número da linha, texto) das linhas preenchidas e devolve os códigos válidos."""
 
     # Cabeçalho: 1ª linha com texto e todas as outras só com números.
     if len(linhas) > 1 and not linhas[0][1].isdigit() and all(t.isdigit() for _, t in linhas[1:]):
@@ -156,13 +201,15 @@ def ler_codigos_planilha(conteudo, nome_arquivo):
     }
     if extensao not in leitores:
         raise ValueError("Formato não suportado. Use .csv, .txt, .xlsx ou .ods.")
+    if extensao in (".xlsx", ".ods"):
+        _verificar_tamanho_descompactado(conteudo)
     try:
-        valores = list(leitores[extensao](conteudo))
+        linhas = _coletar_linhas(leitores[extensao](conteudo))
     except Exception as erro:  # arquivo corrompido ou com outro formato
         raise ValueError(
             "Não foi possível ler a planilha. Verifique se o arquivo não está corrompido."
         ) from erro
-    return _validar_codigos(valores)
+    return _validar_codigos(linhas)
 
 
 def ler_codigos_csv(caminho_csv):
@@ -179,6 +226,10 @@ def gerar_codigos_intervalo(inicio, fim):
         raise ValueError("Informe o número inicial e o número final.")
     if not re.fullmatch(r"[0-9]+", inicio_txt) or not re.fullmatch(r"[0-9]+", fim_txt):
         raise ValueError("O intervalo deve conter apenas números.")
+    # Antes de converter: evita números gigantes (e a mensagem interna do Python
+    # para inteiros com milhares de dígitos) e códigos longos demais para a etiqueta.
+    if max(len(inicio_txt), len(fim_txt)) > MAX_TAMANHO_CODIGO:
+        raise ValueError(f"Os números devem ter no máximo {MAX_TAMANHO_CODIGO} dígitos.")
 
     inicio_n = int(inicio_txt)
     fim_n = int(fim_txt)

@@ -3,3 +3,4 @@ pillow
 python-barcode
 reportlab
 openpyxl
+gunicorn

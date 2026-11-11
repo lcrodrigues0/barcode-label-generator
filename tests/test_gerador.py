@@ -114,6 +114,15 @@ class TestGerarCodigosIntervalo:
         with pytest.raises(ValueError, match="maior ou igual"):
             gerar_codigos_intervalo("20", "10")
 
+    def test_numero_com_o_maximo_de_digitos(self):
+        maximo = "1" * gerador.MAX_TAMANHO_CODIGO
+        assert gerar_codigos_intervalo(maximo, maximo) == [maximo]
+
+    @pytest.mark.parametrize("inicio, fim", [("1" * 41, "1" * 41), ("1", "1" * 41), ("9" * 5000, "9" * 5000)])
+    def test_numero_longo_demais(self, inicio, fim):
+        with pytest.raises(ValueError, match="no máximo 40 dígitos"):
+            gerar_codigos_intervalo(inicio, fim)
+
 
 # --------------------------------------------------------------------------
 # ler_codigos_csv
@@ -454,3 +463,69 @@ class TestCli:
         assert r.returncode != 0
         assert "Formato não suportado" in r.stderr
         assert "Traceback" not in r.stderr
+
+
+class TestCliEmProcesso:
+    """Mesma CLI, executada no processo do pytest (assim entra na medição de cobertura)."""
+
+    def _rodar(self, monkeypatch, *args):
+        import runpy
+
+        monkeypatch.setattr(sys, "argv", ["gerador.py", *args])
+        try:
+            runpy.run_path(gerador.__file__, run_name="__main__")
+        except SystemExit as saida:
+            return str(saida.code) if saida.code not in (None, 0) else None
+        return None
+
+    def test_intervalo(self, monkeypatch, tmp_path, capsys):
+        saida = tmp_path / "sub" / "out.pdf"  # pasta inexistente: a CLI cria
+        assert self._rodar(monkeypatch, "--inicio", "1", "--fim", "2", "--saida", str(saida)) is None
+        assert len(PdfReader(saida).pages[0].images) == 2
+        assert "PDF gerado" in capsys.readouterr().out
+
+    def test_planilha_padrao_do_projeto(self, monkeypatch, tmp_path):
+        saida = tmp_path / "out.pdf"
+        assert self._rodar(monkeypatch, "--saida", str(saida)) is None
+        assert PdfReader(saida).pages
+
+    @pytest.mark.parametrize(
+        "args, mensagem",
+        [
+            (["--inicio", "1"], "juntos"),
+            (["--fim", "1"], "juntos"),
+            (["--inicio", "1", "--fim", "2", "--csv", "x.csv"], "não os dois"),
+            (["--inicio", "9", "--fim", "1"], "maior ou igual"),
+            (["--csv", "nao_existe.csv"], "não encontrado"),
+            (["--inicio", "1", "--fim", "1", "--orgao", "X" * 200], None),
+        ],
+    )
+    def test_erros(self, monkeypatch, tmp_path, args, mensagem):
+        erro = self._rodar(monkeypatch, *args, "--saida", str(tmp_path / "o.pdf"))
+        if mensagem is None:
+            assert erro is None  # texto longo na CLI: só reduz a fonte
+        else:
+            assert mensagem in erro
+
+    def test_planilha_invalida(self, monkeypatch, tmp_path):
+        planilha = tmp_path / "vazia.csv"
+        planilha.write_text("\n")
+        assert "Nenhum código" in self._rodar(monkeypatch, "--planilha", str(planilha))
+
+
+class TestDetalhesDaLeitura:
+    def test_valor_booleano_da_planilha(self):
+        assert ler_codigos_planilha(xlsx([5, True]), "a.xlsx") == ["5", "True"]
+
+    def test_ods_sem_tabela(self):
+        import zipfile
+
+        destino = BytesIO()
+        with zipfile.ZipFile(destino, "w") as arquivo:
+            arquivo.writestr(
+                "content.xml",
+                '<office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0">'
+                "<office:body/></office:document-content>",
+            )
+        with pytest.raises(ValueError, match="Nenhum código"):
+            ler_codigos_planilha(destino.getvalue(), "a.ods")
