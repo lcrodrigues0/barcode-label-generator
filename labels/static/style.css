@@ -222,6 +222,11 @@ fieldset:disabled input {
 .preview-head {
   grid-column: 2;
   grid-row: 1;
+  /* Não deixa o texto (ex.: o aviso) alargar a coluna: a largura vem da folha da
+     prévia. width: 0 tira o cabeçalho do cálculo da coluna, e min-width: 100%
+     o estica até a largura dela; o texto quebra em várias linhas. */
+  width: 0;
+  min-width: 100%;
   display: flex;
   justify-content: space-between;
   align-items: baseline;
