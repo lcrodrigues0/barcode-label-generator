@@ -6,6 +6,7 @@ import pytest
 from pypdf import PdfReader
 
 from labels.gerador import ETIQUETAS_POR_PAGINA, MAX_CODIGOS, ORGAO_PADRAO
+from auxiliares_pdf import contar_codigos_de_barras
 from planilhas import ods, xlsx
 
 
@@ -56,14 +57,14 @@ class TestGerar:
         for n in range(100, 105):
             assert str(n) in texto
         assert texto.count("ÓRGÃO X") == 5
-        assert len(reader.pages[0].images) == 5
+        assert contar_codigos_de_barras(reader.pages[0]) == 5
 
     def test_orgao_vazio_sem_texto(self, client):
         r = client.post("/gerar", data={"inicio": "1", "fim": "1", "orgao": "   "})
         assert r.status_code == 200
         reader = _ler_pdf(r)
         assert _texto(reader).strip() == "1"
-        assert len(reader.pages[0].images) == 1
+        assert contar_codigos_de_barras(reader.pages[0]) == 1
 
     def test_erro_preserva_orgao_vazio(self, client):
         r = client.post("/gerar", data={"inicio": "10", "fim": "1", "orgao": ""})
@@ -181,7 +182,7 @@ class TestPreview:
         assert r.headers["Cache-Control"] == "no-store"
         reader = _ler_pdf(r)
         assert len(reader.pages) == 3
-        assert len(reader.pages[2].images) == 1
+        assert contar_codigos_de_barras(reader.pages[2]) == 1
 
     def test_igual_ao_pdf_final(self, client):
         dados = {"inicio": "500", "fim": "620", "orgao": "TESTE"}
@@ -252,7 +253,7 @@ class TestPlanilha:
         reader = _ler_pdf(r)
         texto = _texto(reader)
         assert all(c in texto for c in ("111", "222", "333"))
-        assert len(reader.pages[0].images) == 3
+        assert contar_codigos_de_barras(reader.pages[0]) == 3
 
     def test_planilha_ignora_intervalo(self, client):
         r = client.post(
@@ -260,7 +261,7 @@ class TestPlanilha:
             data={"inicio": "1", "fim": "50", "planilha": _arquivo(b"777\n", "a.csv")},
         )
         reader = _ler_pdf(r)
-        assert len(reader.pages[0].images) == 1
+        assert contar_codigos_de_barras(reader.pages[0]) == 1
         assert "777" in _texto(reader)
 
     def test_gerar_com_xlsx(self, client):
@@ -275,7 +276,7 @@ class TestPlanilha:
         conteudo = ods([12385319, "0007"], linhas_vazias_no_fim=1_000_000)
         r = client.post("/gerar", data={"planilha": _arquivo(conteudo, "x.ods")})
         assert r.status_code == 200
-        assert len(_ler_pdf(r).pages[0].images) == 2
+        assert contar_codigos_de_barras(_ler_pdf(r).pages[0]) == 2
 
     def test_nome_do_pdf_sanitizado(self, client):
         r = client.post("/gerar", data={"planilha": _arquivo(b"1\n", "Lote de março (final).csv")})
@@ -287,7 +288,7 @@ class TestPlanilha:
         assert info.get_json() == {"codigos": 3, "paginas": 1}
         prev = client.post("/preview", data=dados())
         assert prev.mimetype == "application/pdf"
-        assert len(_ler_pdf(prev).pages[0].images) == 3
+        assert contar_codigos_de_barras(_ler_pdf(prev).pages[0]) == 3
 
     @pytest.mark.parametrize(
         "conteudo, nome, mensagem",

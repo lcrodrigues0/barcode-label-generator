@@ -8,9 +8,7 @@ from itertools import takewhile
 from math import ceil
 from pathlib import Path
 
-from barcode.writer import ImageWriter
 from reportlab.lib.pagesizes import A4
-from reportlab.lib.utils import ImageReader
 from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.pdfgen import canvas
 
@@ -26,7 +24,15 @@ ESPACO_VERTICAL = 80
 ESPACO_HORIZONTAL = LARGURA_IMAGEM + 5
 FONT_TYPE = "Helvetica-Bold"
 FONT_SIZE = 0.8 * 10
-BARCODE_OPTIONS = {"write_text": False}
+# Geometria do código de barras, em mm, igual à imagem que o python-barcode gerava
+# (ImageWriter com write_text=False): módulos de 0,2 mm, margem branca de 2,54 mm
+# nas laterais (o mínimo que o Code128 do python-barcode impõe) e de 1 mm em cima
+# e embaixo, barras de 15 mm. Esse retângulo é esticado para
+# LARGURA_IMAGEM x ALTURA_IMAGEM, como a imagem era.
+LARGURA_MODULO_MM = 0.2
+MARGEM_LATERAL_MM = 2.54
+MARGEM_VERTICAL_MM = 1.0
+ALTURA_BARRAS_MM = 15.0
 RAIZ_PROJETO = Path(__file__).resolve().parent.parent
 CSV_PADRAO = str(RAIZ_PROJETO / "data" / "codigos-oficiais.csv")
 PDF_PADRAO = str(RAIZ_PROJETO / "output" / "codigos_barras.pdf")
@@ -281,6 +287,38 @@ def contar_paginas(quantidade_codigos):
     return ceil(quantidade_codigos / ETIQUETAS_POR_PAGINA)
 
 
+def _desenhar_codigo_de_barras(c, codigo, x, y, nome_forma):
+    """Desenha o Code 128 como retângulos vetoriais no retângulo (x, y, LARGURA x ALTURA).
+
+    Antes cada código virava uma imagem PNG (Pillow), o que era lento e gerava PDFs
+    enormes. As barras são as mesmas: a codificação continua vindo do python-barcode.
+    Cada código fica num Form XObject próprio (um bloco do PDF), o que também permite
+    contar as etiquetas de um PDF.
+    """
+    modulos = barcode.get("code128", codigo).build()[0]
+    largura_mm = 2 * MARGEM_LATERAL_MM + len(modulos) * LARGURA_MODULO_MM
+    altura_mm = 2 * MARGEM_VERTICAL_MM + ALTURA_BARRAS_MM
+    escala_x = LARGURA_IMAGEM / largura_mm
+    escala_y = ALTURA_IMAGEM / altura_mm
+
+    c.beginForm(nome_forma)
+    c.setFillColorRGB(0, 0, 0)
+    caminho = c.beginPath()
+    base = MARGEM_VERTICAL_MM * escala_y
+    altura = ALTURA_BARRAS_MM * escala_y
+    for barra in re.finditer("1+", modulos):
+        inicio_mm = MARGEM_LATERAL_MM + barra.start() * LARGURA_MODULO_MM
+        largura = (barra.end() - barra.start()) * LARGURA_MODULO_MM * escala_x
+        caminho.rect(inicio_mm * escala_x, base, largura, altura)
+    c.drawPath(caminho, stroke=0, fill=1)
+    c.endForm()
+
+    c.saveState()
+    c.translate(x, y)
+    c.doForm(nome_forma)
+    c.restoreState()
+
+
 def gerar_pdf(codigos, destino=PDF_PADRAO, nome_do_orgao=ORGAO_PADRAO):
     if not codigos:
         raise ValueError("Nenhum código para gerar.")
@@ -294,29 +332,17 @@ def gerar_pdf(codigos, destino=PDF_PADRAO, nome_do_orgao=ORGAO_PADRAO):
     c = canvas.Canvas(destino, pagesize=A4)
 
     pagina_atual = 0
-    for codigo_num, (pagina, x, y) in zip(codigos, _posicoes()):
+    for indice, (codigo_num, (pagina, x, y)) in enumerate(zip(codigos, _posicoes())):
         if pagina != pagina_atual:
             c.showPage()
             pagina_atual = pagina
-
-        imagem = BytesIO()
-        barcode.get("code128", codigo_num, writer=ImageWriter()).write(
-            imagem, BARCODE_OPTIONS
-        )
-        imagem.seek(0)
 
         mt = ALTURA_IMAGEM + 4
         mb = -10
 
         if nome_do_orgao:
             _desenhar_centralizado(c, nome_do_orgao, x, y + mt, tamanho_orgao)
-        c.drawImage(
-            ImageReader(imagem),
-            x,
-            y,
-            width=LARGURA_IMAGEM,
-            height=ALTURA_IMAGEM,
-        )
+        _desenhar_codigo_de_barras(c, codigo_num, x, y, f"cb{indice}")
         _desenhar_centralizado(
             c, codigo_num, x, y + mb, tamanho_fonte_ajustado(codigo_num)
         )

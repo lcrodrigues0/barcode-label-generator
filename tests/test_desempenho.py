@@ -36,6 +36,16 @@ class TestRespostasRapidas:
         assert r.get_json()["codigos"] == MAX_CODIGOS
         assert segundos < 0.5
 
+    def test_pdf_grande_e_rapido(self):
+        # Desenhar as barras como vetor: 2.000 códigos levam ~0,5 s. Com uma imagem PNG
+        # por código (versão antiga) eram ~6 s, e o Render derrubava o worker por timeout.
+        destino = BytesIO()
+        _, segundos = _cronometrar(
+            lambda: gerar_pdf([str(10_000_000 + n) for n in range(2_000)], destino=destino)
+        )
+        assert segundos < 3
+        assert len(destino.getvalue()) < 3 * 1024 * 1024
+
     def test_preview_de_uma_pagina(self, client):
         r, segundos = _cronometrar(
             lambda: client.post("/preview", data={"inicio": "1", "fim": str(ETIQUETAS_POR_PAGINA)})
@@ -53,7 +63,8 @@ class TestVolumeMaximo:
         tamanho_mb = len(destino.getvalue()) / 1e6
         print(f"\n{MAX_CODIGOS} códigos: {segundos:.1f}s, {tamanho_mb:.1f} MB")
 
-        assert segundos < TIMEOUT_DO_SERVIDOR_S / 2
+        assert segundos < 15
+        assert tamanho_mb < 10
         assert len(PdfReader(BytesIO(destino.getvalue())).pages) == MAX_CODIGOS // ETIQUETAS_POR_PAGINA
 
     def test_download_com_o_maximo_de_codigos(self, client):

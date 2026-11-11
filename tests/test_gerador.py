@@ -22,6 +22,7 @@ from labels.gerador import (
     ler_codigos_planilha,
     tamanho_fonte_ajustado,
 )
+from auxiliares_pdf import contar_codigos_de_barras
 from planilhas import ods, xlsx
 
 ETIQUETAS_POR_PAGINA = 50  # 5 colunas x 10 linhas em A4
@@ -250,7 +251,7 @@ class TestGerarPdf:
     def test_orgao_vazio_sem_texto(self, orgao):
         reader = _pdf(["123"], nome_do_orgao=orgao)
         assert _texto(reader).strip() == "123"
-        assert len(reader.pages[0].images) == 1
+        assert contar_codigos_de_barras(reader.pages[0]) == 1
 
     def test_orgao_vazio_mantem_posicao_do_numero(self):
         com = [t for t in _textos_com_posicao(_pdf(["123"]).pages[0]) if t[0] == "123"]
@@ -259,7 +260,7 @@ class TestGerarPdf:
 
     def test_uma_imagem_por_codigo(self):
         reader = _pdf(["1", "2", "3"])
-        assert len(reader.pages[0].images) == 3
+        assert contar_codigos_de_barras(reader.pages[0]) == 3
 
     def test_pagina_a4(self):
         pagina = _pdf(["1"]).pages[0]
@@ -280,7 +281,7 @@ class TestGerarPdf:
         codigos = [str(n) for n in range(1, quantidade + 1)]
         reader = _pdf(codigos)
         assert len(reader.pages) == paginas
-        assert sum(len(p.images) for p in reader.pages) == quantidade
+        assert sum(contar_codigos_de_barras(p) for p in reader.pages) == quantidade
 
     def test_etiquetas_dentro_da_pagina(self):
         """Nenhum texto pode sair dos limites da folha A4."""
@@ -399,7 +400,7 @@ class TestCli:
         saida = tmp_path / "out.pdf"
         r = self._rodar("--inicio", "1", "--fim", "3", "--saida", str(saida), cwd=tmp_path)
         assert r.returncode == 0, r.stderr
-        assert len(PdfReader(saida).pages[0].images) == 3
+        assert contar_codigos_de_barras(PdfReader(saida).pages[0]) == 3
 
     def test_csv(self, tmp_path):
         csv = tmp_path / "c.csv"
@@ -481,7 +482,7 @@ class TestCliEmProcesso:
     def test_intervalo(self, monkeypatch, tmp_path, capsys):
         saida = tmp_path / "sub" / "out.pdf"  # pasta inexistente: a CLI cria
         assert self._rodar(monkeypatch, "--inicio", "1", "--fim", "2", "--saida", str(saida)) is None
-        assert len(PdfReader(saida).pages[0].images) == 2
+        assert contar_codigos_de_barras(PdfReader(saida).pages[0]) == 2
         assert "PDF gerado" in capsys.readouterr().out
 
     def test_planilha_padrao_do_projeto(self, monkeypatch, tmp_path):
