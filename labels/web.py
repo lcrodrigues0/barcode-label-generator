@@ -9,6 +9,7 @@ from labels.gerador import (
     MAX_ORGAO,
     MAX_TAMANHO_CODIGO,
     ORGAO_PADRAO,
+    ETIQUETAS_POR_PAGINA,
     contar_paginas,
     gerar_codigos_intervalo,
     gerar_pdf,
@@ -150,13 +151,18 @@ def preview_info():
 
 @app.route("/preview", methods=["POST"])
 def preview():
-    """PDF completo, exibido inline no iframe da página (o formulário é enviado para ele)."""
+    """Só a 1ª página do PDF, exibida inline no iframe (o formulário é enviado para ele).
+
+    Gerar o PDF inteiro a cada alteração do formulário pesa no servidor; a página
+    avisa o usuário de que o PDF baixado terá todas as páginas.
+    """
     try:
         _, orgao, codigos = _ler_formulario()
     except ValueError as erro:
         return jsonify(erro=str(erro)), 400
 
-    resposta = send_file(_pdf_em_memoria(codigos, orgao), mimetype="application/pdf")
+    primeira_pagina = codigos[:ETIQUETAS_POR_PAGINA]
+    resposta = send_file(_pdf_em_memoria(primeira_pagina, orgao), mimetype="application/pdf")
     resposta.headers["Cache-Control"] = "no-store"
     return resposta
 

@@ -1,5 +1,6 @@
-// Prévia do PDF completo num iframe, atualizada enquanto o usuário preenche o formulário.
-// A navegação entre páginas e o zoom ficam com o leitor de PDF do navegador.
+// Prévia da 1ª página do PDF num iframe, atualizada enquanto o usuário preenche o
+// formulário. Quando o PDF tem mais páginas, um aviso deixa claro que o arquivo
+// gerado terá todas. O zoom fica com o leitor de PDF do navegador.
 // Os códigos vêm do intervalo numérico ou de uma planilha importada (que bloqueia o intervalo).
 (function () {
   const form = document.getElementById("form-etiquetas");
@@ -7,6 +8,7 @@
   const folha = frame.parentElement;
   const mensagem = document.getElementById("preview-mensagem");
   const resumo = document.getElementById("preview-resumo");
+  const aviso = document.getElementById("preview-aviso");
   const campoIntervalo = form.querySelector("fieldset.range");
   const campoPlanilha = document.getElementById("campo-planilha");
   const botaoRemover = document.getElementById("remover-planilha");
@@ -19,6 +21,7 @@
   let controlador = null;
 
   function mostrarMensagem(estado, texto) {
+    aviso.hidden = true;
     folha.dataset.estado = estado;
     delete folha.dataset.carregando;
     mensagem.textContent = texto;
@@ -81,6 +84,14 @@
     resumo.textContent =
       `${info.codigos} ${plural(info.codigos, "código", "códigos")} · ` +
       `${info.paginas} ${plural(info.paginas, "página", "páginas")}`;
+    if (info.paginas > 1) {
+      aviso.textContent =
+        `A prévia mostra apenas a 1ª página de ${info.paginas}. ` +
+        `O PDF gerado terá todas as ${info.paginas} páginas.`;
+      aviso.hidden = false;
+    } else {
+      aviso.hidden = true;
+    }
     folha.dataset.estado = "ok";
     mensagem.hidden = true;
     frame.hidden = false;

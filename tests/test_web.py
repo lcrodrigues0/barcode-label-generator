@@ -173,7 +173,7 @@ class TestTokenDeDownload:
 
 
 class TestPreview:
-    def test_retorna_pdf_completo_inline(self, client):
+    def test_retorna_so_a_primeira_pagina_inline(self, client):
         quantidade = ETIQUETAS_POR_PAGINA * 2 + 1
         r = client.post("/preview", data={"inicio": "1", "fim": str(quantidade), "orgao": "TESTE"})
         assert r.status_code == 200
@@ -181,14 +181,35 @@ class TestPreview:
         assert "attachment" not in r.headers.get("Content-Disposition", "")
         assert r.headers["Cache-Control"] == "no-store"
         reader = _ler_pdf(r)
-        assert len(reader.pages) == 3
-        assert contar_codigos_de_barras(reader.pages[2]) == 1
+        assert len(reader.pages) == 1
+        assert contar_codigos_de_barras(reader.pages[0]) == ETIQUETAS_POR_PAGINA
+        texto = _texto(reader)
+        assert str(ETIQUETAS_POR_PAGINA) in texto
+        assert str(ETIQUETAS_POR_PAGINA + 1) not in texto
 
-    def test_igual_ao_pdf_final(self, client):
+    def test_info_continua_com_o_total(self, client):
+        # O resumo (e o aviso na tela) usa o total, não só a 1ª página.
+        quantidade = ETIQUETAS_POR_PAGINA * 2 + 1
+        r = client.post("/preview/info", data={"inicio": "1", "fim": str(quantidade)})
+        assert r.get_json() == {"codigos": quantidade, "paginas": 3}
+
+    def test_menos_que_uma_pagina(self, client):
+        r = client.post("/preview", data={"inicio": "1", "fim": "3"})
+        assert contar_codigos_de_barras(_ler_pdf(r).pages[0]) == 3
+
+    def test_primeira_pagina_igual_a_do_pdf_final(self, client):
         dados = {"inicio": "500", "fim": "620", "orgao": "TESTE"}
         prev = _ler_pdf(client.post("/preview", data=dados))
         final = _ler_pdf(client.post("/gerar", data=dados))
-        assert [p.extract_text() for p in prev.pages] == [p.extract_text() for p in final.pages]
+        assert len(final.pages) == 3
+        assert prev.pages[0].extract_text() == final.pages[0].extract_text()
+
+    def test_pagina_deixa_claro_que_e_so_a_primeira(self, client):
+        html = client.get("/").get_data(as_text=True)
+        assert "Prévia da 1ª página" in html
+        assert 'id="preview-aviso"' in html
+        js = client.get("/static/preview.js").get_data(as_text=True)
+        assert "A prévia mostra apenas a 1ª página" in js
 
     def test_orgao_vazio_sem_texto(self, client):
         r = client.post("/preview", data={"inicio": "1", "fim": "2", "orgao": ""})

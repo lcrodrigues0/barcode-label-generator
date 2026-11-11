@@ -236,6 +236,20 @@ fieldset:disabled input {
   color: var(--muted);
 }
 
+/* Avisa que a prévia mostra só a 1ª página quando o PDF tem mais de uma. */
+.preview-aviso {
+  flex-basis: 100%;
+  margin: 0;
+  padding: 8px 12px;
+  font-size: 0.85rem;
+  border-left: 3px solid var(--accent);
+  background: var(--sheet);
+}
+
+.preview-aviso[hidden] {
+  display: none;
+}
+
 .preview-folha {
   grid-column: 2;
   grid-row: 2;
