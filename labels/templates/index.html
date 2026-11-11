@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Etiquetas de código de barras</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <div class="layout">
+    <main class="sheet">
+      <header>
+        <p class="eyebrow">Gerador de etiquetas</p>
+        <h1>Códigos de barras em PDF</h1>
+      </header>
+
+      {% if erro %}
+      <p class="alert" role="alert">{{ erro }}</p>
+      {% endif %}
+
+      <form id="form-etiquetas" action="{{ url_for('gerar') }}" method="post" data-preview-url="{{ url_for('preview') }}" data-preview-info-url="{{ url_for('preview_info') }}">
+        <fieldset class="range">
+          <legend>Intervalo</legend>
+          <label>
+            Número inicial
+            <input type="text" name="inicio" inputmode="numeric" pattern="[0-9]+" required placeholder="12385319" value="{{ inicio or '' }}" autocomplete="off">
+          </label>
+          <span class="range-sep" aria-hidden="true">→</span>
+          <label>
+            Número final
+            <input type="text" name="fim" inputmode="numeric" pattern="[0-9]+" required placeholder="12385350" value="{{ fim or '' }}" autocomplete="off">
+          </label>
+        </fieldset>
+
+        <label>
+          Texto do órgão
+          <input type="text" name="orgao" value="{{ orgao_padrao }}" maxlength="{{ max_orgao }}" placeholder="Sem texto acima do código">
+        </label>
+
+        <fieldset class="csv" disabled>
+          <legend>CSV</legend>
+          <label>
+            Arquivo CSV
+            <input type="file" accept=".csv" tabindex="-1">
+          </label>
+          <p class="hint">Importação por CSV está desabilitada nesta tela. Use o script com <code>--csv</code> se precisar.</p>
+        </fieldset>
+
+        <button type="submit">Gerar PDF</button>
+      </form>
+    </main>
+
+    <aside class="preview" aria-labelledby="preview-titulo">
+      <div class="preview-head">
+        <p id="preview-titulo" class="eyebrow">Prévia</p>
+        <p id="preview-resumo" class="preview-resumo" aria-live="polite">Preencha o intervalo para ver as páginas.</p>
+      </div>
+      <div class="preview-folha" data-estado="vazio">
+        <iframe id="preview-frame" title="Prévia do PDF" hidden></iframe>
+        <p id="preview-mensagem" class="preview-mensagem">As páginas aparecem aqui.</p>
+      </div>
+    </aside>
+  </div>
+
+  <script src="{{ url_for('static', filename='preview.js') }}"></script>
+</body>
+</html>

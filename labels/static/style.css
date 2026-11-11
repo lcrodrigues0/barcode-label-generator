@@ -1,0 +1,292 @@
+:root {
+  --ink: #1b1a17;
+  --paper: #f4efe4;
+  --sheet: #fffdf8;
+  --rule: #d7cfc0;
+  --accent: #b42318;
+  --muted: #6b6458;
+  --escala-preview: 1.3; /* tamanho da folha da prévia em relação à altura da tela */
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: "IBM Plex Sans", system-ui, sans-serif;
+  color: var(--ink);
+  background:
+    repeating-linear-gradient(
+      90deg,
+      transparent 0,
+      transparent 47px,
+      rgba(180, 35, 24, 0.08) 47px,
+      rgba(180, 35, 24, 0.08) 48px
+    ),
+    var(--paper);
+  display: grid;
+  place-items: center;
+  padding: 32px 16px;
+}
+
+.layout {
+  max-width: 100%;
+  display: grid;
+  grid-template-columns: minmax(340px, 440px) auto;
+  /* Linha 1: cabeçalho da prévia. Linha 2: card do formulário e folha da prévia,
+     alinhados pelo topo. */
+  grid-template-rows: auto auto;
+  column-gap: 32px;
+  row-gap: 12px;
+  align-items: start;
+}
+
+.layout > .sheet {
+  grid-column: 1;
+  grid-row: 2;
+}
+
+.sheet {
+  width: 100%;
+  background: var(--sheet);
+  border: 1px solid var(--ink);
+  box-shadow: 8px 8px 0 var(--ink);
+  padding: 36px 32px 40px;
+}
+
+.eyebrow {
+  margin: 0;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.75rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+h1 {
+  margin: 8px 0 10px;
+  font-size: 1.7rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.lede {
+  margin: 0 0 28px;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+form {
+  display: grid;
+  gap: 20px;
+}
+
+fieldset {
+  margin: 0;
+  min-width: 0; /* o padrão (min-content) impede o fieldset de encolher */
+  padding: 16px;
+  border: 1px dashed var(--rule);
+}
+
+legend {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 0 6px;
+}
+
+.range {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 12px;
+  align-items: end;
+}
+
+.range-sep {
+  padding-bottom: 12px;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+label {
+  display: grid;
+  gap: 6px;
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+input {
+  width: 100%;
+  min-width: 0;
+  font: inherit;
+  font-family: "IBM Plex Mono", monospace;
+  padding: 10px 12px;
+  border: 1px solid var(--ink);
+  background: #fff;
+  color: var(--ink);
+}
+
+input:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.csv {
+  opacity: 0.55;
+  background: repeating-linear-gradient(
+    -45deg,
+    transparent,
+    transparent 6px,
+    rgba(0, 0, 0, 0.03) 6px,
+    rgba(0, 0, 0, 0.03) 7px
+  );
+}
+
+.hint {
+  margin: 10px 0 0;
+  font-size: 0.82rem;
+  font-weight: 400;
+  color: var(--muted);
+}
+
+code {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.85em;
+}
+
+button {
+  justify-self: start;
+  font: inherit;
+  font-weight: 600;
+  padding: 12px 22px;
+  border: 1px solid var(--ink);
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+}
+
+button:hover {
+  filter: brightness(1.05);
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: progress;
+  filter: none;
+}
+
+.alert {
+  margin: 0 0 20px;
+  padding: 12px 14px;
+  border: 1px solid var(--accent);
+  background: #fbeaea;
+  color: var(--accent);
+}
+
+/* O aside some do layout e seus filhos viram itens do grid de .layout. */
+.preview {
+  display: contents;
+}
+
+.preview-head {
+  grid-column: 2;
+  grid-row: 1;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.preview-resumo {
+  margin: 0;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.preview-folha {
+  grid-column: 2;
+  grid-row: 2;
+  position: relative;
+  /* Proporção de folha A4 (mais alta que larga). A altura é a da tela
+     (descontando o padding da página e o cabeçalho da prévia) multiplicada por
+     --escala-preview; com 1.3 a folha fica mais alta que a tela e a página rola.
+     A largura sai da proporção. O segundo limite evita estourar a largura em
+     telas estreitas (desconta o formulário de 440px e os espaçamentos). */
+  aspect-ratio: 210 / 297;
+  width: min(
+    calc((100vh - 120px) * var(--escala-preview) * 210 / 297),
+    calc(100vw - 440px - 32px - 40px)
+  );
+  min-width: 420px;
+  background: #fff;
+  border: 1px solid var(--ink);
+  box-shadow: 8px 8px 0 var(--ink);
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  transition: opacity 0.15s;
+}
+
+.preview-folha[data-carregando] {
+  opacity: 0.6;
+}
+
+.preview-folha iframe {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+
+.preview-mensagem {
+  margin: 0;
+  padding: 24px;
+  max-width: 32ch;
+  text-align: center;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+.preview-folha[data-estado="erro"] .preview-mensagem {
+  color: var(--accent);
+}
+
+@media (max-width: 900px) {
+  .layout {
+    grid-template-columns: 1fr;
+    width: min(640px, 100%);
+  }
+
+  /* Uma coluna: formulário, depois cabeçalho da prévia, depois a folha. */
+  .layout > .sheet,
+  .preview-head,
+  .preview-folha {
+    grid-column: 1;
+    grid-row: auto;
+  }
+
+  .layout > .sheet {
+    margin-bottom: 20px;
+  }
+
+  .preview-folha {
+    width: 100%;
+    min-width: 0;
+  }
+}
+
+@media (max-width: 560px) {
+  .range {
+    grid-template-columns: 1fr;
+  }
+
+  .range-sep {
+    display: none;
+  }
+}
