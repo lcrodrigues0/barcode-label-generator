@@ -6,6 +6,7 @@
   --accent: #b42318;
   --muted: #6b6458;
   --escala-preview: 1.3; /* tamanho da folha da prévia em relação à altura da tela */
+  --largura-form: 520px; /* largura máxima do card do formulário */
 }
 
 * {
@@ -34,7 +35,7 @@ body {
 .layout {
   max-width: 100%;
   display: grid;
-  grid-template-columns: minmax(340px, 440px) auto;
+  grid-template-columns: minmax(340px, var(--largura-form)) auto;
   /* Linha 1: cabeçalho da prévia. Linha 2: card do formulário e folha da prévia,
      alinhados pelo topo. */
   grid-template-rows: auto auto;
@@ -134,8 +135,10 @@ input:focus {
   outline-offset: 2px;
 }
 
-.csv {
+/* Bloqueado (ex.: intervalo enquanto há uma planilha selecionada). */
+fieldset:disabled {
   opacity: 0.55;
+  cursor: not-allowed;
   background: repeating-linear-gradient(
     -45deg,
     transparent,
@@ -178,6 +181,31 @@ button:disabled {
   filter: none;
 }
 
+fieldset:disabled input {
+  cursor: not-allowed;
+}
+
+.planilha {
+  display: grid;
+  gap: 10px;
+}
+
+.planilha input[type="file"] {
+  padding: 8px;
+  cursor: pointer;
+}
+
+.botao-secundario {
+  padding: 8px 14px;
+  font-size: 0.85rem;
+  background: var(--sheet);
+  color: var(--ink);
+}
+
+.planilha .hint {
+  margin: 0;
+}
+
 .alert {
   margin: 0 0 20px;
   padding: 12px 14px;
@@ -216,11 +244,11 @@ button:disabled {
      (descontando o padding da página e o cabeçalho da prévia) multiplicada por
      --escala-preview; com 1.3 a folha fica mais alta que a tela e a página rola.
      A largura sai da proporção. O segundo limite evita estourar a largura em
-     telas estreitas (desconta o formulário de 440px e os espaçamentos). */
+     telas estreitas (desconta a largura do formulário e os espaçamentos). */
   aspect-ratio: 210 / 297;
   width: min(
     calc((100vh - 120px) * var(--escala-preview) * 210 / 297),
-    calc(100vw - 440px - 32px - 40px)
+    calc(100vw - var(--largura-form) - 32px - 40px)
   );
   min-width: 420px;
   background: #fff;
@@ -229,11 +257,58 @@ button:disabled {
   display: grid;
   place-items: center;
   overflow: hidden;
+}
+
+.preview-folha iframe,
+.preview-mensagem {
   transition: opacity 0.15s;
 }
 
-.preview-folha[data-carregando] {
-  opacity: 0.6;
+/* Carregando: esmaece o conteúdo anterior e mostra o aviso por cima. */
+.preview-folha[data-carregando] iframe,
+.preview-folha[data-carregando] .preview-mensagem {
+  opacity: 0.35;
+}
+
+.preview-carregando {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.85rem;
+  color: var(--ink);
+  background: rgba(255, 253, 248, 0.6);
+  pointer-events: none;
+}
+
+.preview-folha[data-carregando] .preview-carregando {
+  display: flex;
+}
+
+.spinner {
+  width: 36px;
+  height: 36px;
+  border: 3px solid var(--rule);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: girar 0.8s linear infinite;
+}
+
+@keyframes girar {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation-duration: 2.4s;
+  }
 }
 
 .preview-folha iframe {

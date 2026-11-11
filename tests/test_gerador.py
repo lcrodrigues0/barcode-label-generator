@@ -19,8 +19,10 @@ from labels.gerador import (
     gerar_codigos_intervalo,
     gerar_pdf,
     ler_codigos_csv,
+    ler_codigos_planilha,
     tamanho_fonte_ajustado,
 )
+from planilhas import ods, xlsx
 
 ETIQUETAS_POR_PAGINA = 50  # 5 colunas x 10 linhas em A4
 
@@ -128,6 +130,87 @@ class TestLerCodigosCsv:
         codigos = ler_codigos_csv(gerador.CSV_PADRAO)
         assert codigos
         assert all(c.isdigit() for c in codigos)
+
+    def test_le_xlsx_do_disco(self, tmp_path):
+        arquivo = tmp_path / "c.xlsx"
+        arquivo.write_bytes(xlsx([1, 2]))
+        assert ler_codigos_csv(arquivo) == ["1", "2"]
+
+
+# --------------------------------------------------------------------------
+# ler_codigos_planilha
+# --------------------------------------------------------------------------
+
+
+class TestLerCodigosPlanilha:
+    @pytest.mark.parametrize(
+        "conteudo",
+        [
+            b"111\n222\n",
+            b"111,a\n222,b\n",
+            b"111;a\n222;b\n",
+            b"111\ta\n222\tb\n",
+            b"\xef\xbb\xbf111\r\n222\r\n",  # UTF-8 com BOM e quebra de linha do Windows
+        ],
+    )
+    def test_csv_primeira_coluna(self, conteudo):
+        assert ler_codigos_planilha(conteudo, "a.csv") == ["111", "222"]
+
+    def test_txt(self):
+        assert ler_codigos_planilha(b"001\n002", "a.TXT") == ["001", "002"]
+
+    def test_csv_latin1(self):
+        conteudo = "Código\n10\n".encode("latin-1")
+        assert ler_codigos_planilha(conteudo, "a.csv") == ["10"]
+
+    def test_xlsx_numeros_e_texto(self):
+        conteudo = xlsx([12385319, 12385320.0, None, "000123", "  A-1  "])
+        assert ler_codigos_planilha(conteudo, "a.xlsx") == ["12385319", "12385320", "000123", "A-1"]
+
+    def test_ods_com_linhas_repetidas_no_fim(self):
+        conteudo = ods([12385319, None, "0007"], linhas_vazias_no_fim=1_048_000)
+        assert ler_codigos_planilha(conteudo, "a.ods") == ["12385319", "0007"]
+
+    @pytest.mark.parametrize("gerar", [xlsx, ods])
+    def test_cabecalho_ignorado(self, gerar):
+        assert ler_codigos_planilha(gerar(["codigo", 1, 2]), "a.xlsx" if gerar is xlsx else "a.ods") == ["1", "2"]
+
+    def test_cabecalho_mantido_se_ha_outros_textos(self):
+        assert ler_codigos_planilha(b"ABC\nDEF\n12\n", "a.csv") == ["ABC", "DEF", "12"]
+
+    def test_codigo_unico_com_letras_nao_e_cabecalho(self):
+        assert ler_codigos_planilha(b"ABC\n", "a.csv") == ["ABC"]
+
+    def test_sem_codigos(self):
+        with pytest.raises(ValueError, match="Nenhum código"):
+            ler_codigos_planilha(b"\n \n", "a.csv")
+
+    def test_somente_cabecalho_vira_codigo(self):
+        # Uma linha só não tem como ser identificada como cabeçalho.
+        assert ler_codigos_planilha(b"codigo\n", "a.csv") == ["codigo"]
+
+    def test_caractere_nao_aceito_indica_linha(self):
+        with pytest.raises(ValueError, match="Linha 3"):
+            ler_codigos_planilha("1\n2\nação\n".encode(), "a.csv")
+
+    def test_codigo_longo_demais(self):
+        with pytest.raises(ValueError, match="no máximo 40"):
+            ler_codigos_planilha(b"1\n" + b"9" * 41 + b"\n", "a.csv")
+
+    def test_acima_do_limite(self):
+        conteudo = "\n".join(str(n) for n in range(MAX_CODIGOS + 1)).encode()
+        with pytest.raises(ValueError, match="mais de"):
+            ler_codigos_planilha(conteudo, "a.csv")
+
+    @pytest.mark.parametrize("nome", ["a.pdf", "a.xls", "sem_extensao", ""])
+    def test_formato_nao_suportado(self, nome):
+        with pytest.raises(ValueError, match="Formato não suportado"):
+            ler_codigos_planilha(b"1", nome)
+
+    @pytest.mark.parametrize("nome", ["a.xlsx", "a.ods"])
+    def test_arquivo_corrompido(self, nome):
+        with pytest.raises(ValueError, match="Não foi possível ler"):
+            ler_codigos_planilha(b"isto nao e um zip", nome)
 
 
 # --------------------------------------------------------------------------
@@ -353,4 +436,21 @@ class TestCli:
         r = self._rodar("--inicio", "10", "--fim", "1", cwd=tmp_path)
         assert r.returncode != 0
         assert "maior ou igual" in r.stderr
+        assert "Traceback" not in r.stderr
+
+    def test_planilha_xlsx(self, tmp_path):
+        planilha = tmp_path / "c.xlsx"
+        planilha.write_bytes(xlsx(["codigo", 31, 32]))
+        saida = tmp_path / "out.pdf"
+        r = self._rodar("--planilha", str(planilha), "--saida", str(saida), cwd=tmp_path)
+        assert r.returncode == 0, r.stderr
+        texto = _texto(PdfReader(saida))
+        assert "31" in texto and "32" in texto and "codigo" not in texto
+
+    def test_planilha_invalida_mostra_mensagem(self, tmp_path):
+        planilha = tmp_path / "c.pdf"
+        planilha.write_bytes(b"x")
+        r = self._rodar("--planilha", str(planilha), cwd=tmp_path)
+        assert r.returncode != 0
+        assert "Formato não suportado" in r.stderr
         assert "Traceback" not in r.stderr

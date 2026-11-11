@@ -1,30 +1,53 @@
+import re
 from io import BytesIO
+from pathlib import Path
 
 from flask import Flask, jsonify, render_template, request, send_file
 
 from labels.gerador import (
+    FORMATOS_PLANILHA,
     MAX_ORGAO,
     ORGAO_PADRAO,
     contar_paginas,
     gerar_codigos_intervalo,
     gerar_pdf,
+    ler_codigos_planilha,
 )
 
+MAX_PLANILHA_MB = 5
+# Cookie que avisa a página que o PDF ficou pronto (para reabilitar o botão "Gerar PDF").
+COOKIE_DOWNLOAD = "download_pronto"
+_TOKEN_VALIDO = re.compile(r"[A-Za-z0-9_-]{1,64}")
+
 app = Flask(__name__)
+app.config["MAX_CONTENT_LENGTH"] = MAX_PLANILHA_MB * 1024 * 1024
+
+
+def _nome_base_planilha(nome_arquivo):
+    """Nome da planilha sem extensão, só com caracteres seguros para o nome do PDF."""
+    nome = re.sub(r"[^A-Za-z0-9_-]+", "_", Path(nome_arquivo).stem).strip("_")
+    return nome or "planilha"
 
 
 def _ler_formulario():
-    """Lê e valida o formulário. Lança ValueError com a mensagem para o usuário."""
-    # request.values cobre o POST do formulário e o GET (query string) do iframe.
-    inicio = request.values.get("inicio", "").strip()
-    fim = request.values.get("fim", "").strip()
-    # Campo ausente usa o padrão; campo vazio gera etiquetas sem texto acima do código.
-    orgao = request.values.get("orgao", ORGAO_PADRAO).strip()
+    """Lê e valida o formulário. Lança ValueError com a mensagem para o usuário.
 
+    Devolve (nome_base, orgao, codigos). Com uma planilha enviada, o intervalo é ignorado.
+    """
+    # Campo ausente usa o padrão; campo vazio gera etiquetas sem texto acima do código.
+    orgao = request.form.get("orgao", ORGAO_PADRAO).strip()
     if len(orgao) > MAX_ORGAO:
-        raise ValueError(f"O texto do órgão deve ter no máximo {MAX_ORGAO} caracteres.")
+        raise ValueError(f"O texto acima do código deve ter no máximo {MAX_ORGAO} caracteres.")
+
+    planilha = request.files.get("planilha")
+    if planilha and planilha.filename:
+        codigos = ler_codigos_planilha(planilha.read(), planilha.filename)
+        return _nome_base_planilha(planilha.filename), orgao, codigos
+
+    inicio = request.form.get("inicio", "").strip()
+    fim = request.form.get("fim", "").strip()
     codigos = gerar_codigos_intervalo(inicio, fim)
-    return inicio, fim, orgao, codigos
+    return f"{inicio}_{fim}", orgao, codigos
 
 
 def _pdf_em_memoria(codigos, orgao):
@@ -34,49 +57,70 @@ def _pdf_em_memoria(codigos, orgao):
     return destino
 
 
+def _pagina(erro=None, status=200, ler_formulario=True):
+    # Com ler_formulario=False usa os valores padrão (ex.: corpo grande demais para ser lido).
+    form = request.form if ler_formulario else {}
+    return render_template(
+        "index.html",
+        orgao_padrao=form.get("orgao", ORGAO_PADRAO).strip(),
+        max_orgao=MAX_ORGAO,
+        formatos=",".join(FORMATOS_PLANILHA),
+        inicio=form.get("inicio", "").strip(),
+        fim=form.get("fim", "").strip(),
+        erro=erro,
+    ), status
+
+
+@app.errorhandler(413)
+def planilha_grande_demais(_erro):
+    mensagem = f"Planilha muito grande (máximo de {MAX_PLANILHA_MB} MB)."
+    if request.path.startswith("/preview"):
+        return jsonify(erro=mensagem), 413
+    # Não dá para ler o formulário: o próprio corpo da requisição é que é grande demais.
+    return _pagina(erro=mensagem, status=413, ler_formulario=False)
+
+
 @app.route("/")
 def index():
-    return render_template("index.html", orgao_padrao=ORGAO_PADRAO, max_orgao=MAX_ORGAO)
+    return _pagina()
 
 
 @app.route("/gerar", methods=["POST"])
 def gerar():
     try:
-        inicio, fim, orgao, codigos = _ler_formulario()
+        nome_base, orgao, codigos = _ler_formulario()
         destino = _pdf_em_memoria(codigos, orgao)
     except ValueError as erro:
-        return render_template(
-            "index.html",
-            orgao_padrao=request.form.get("orgao", ORGAO_PADRAO).strip(),
-            max_orgao=MAX_ORGAO,
-            inicio=request.form.get("inicio", "").strip(),
-            fim=request.form.get("fim", "").strip(),
-            erro=str(erro),
-        ), 400
+        return _pagina(erro=str(erro), status=400)
 
-    return send_file(
+    resposta = send_file(
         destino,
         as_attachment=True,
-        download_name=f"codigos_{inicio}_{fim}.pdf",
+        download_name=f"codigos_{nome_base}.pdf",
         mimetype="application/pdf",
     )
+    # Devolve o token enviado pela página; ao ver o cookie, o JS reabilita o botão.
+    token = request.form.get("download_token", "")
+    if _TOKEN_VALIDO.fullmatch(token):
+        resposta.set_cookie(COOKIE_DOWNLOAD, token, max_age=60, samesite="Lax")
+    return resposta
 
 
-@app.route("/preview/info")
+@app.route("/preview/info", methods=["POST"])
 def preview_info():
-    """Valida os parâmetros e devolve o resumo, antes de o iframe carregar o PDF."""
+    """Valida o formulário e devolve o resumo, antes de o iframe carregar o PDF."""
     try:
-        _, _, _, codigos = _ler_formulario()
+        _, _, codigos = _ler_formulario()
     except ValueError as erro:
         return jsonify(erro=str(erro)), 400
     return jsonify(codigos=len(codigos), paginas=contar_paginas(len(codigos)))
 
 
-@app.route("/preview")
+@app.route("/preview", methods=["POST"])
 def preview():
-    """PDF completo, exibido inline no iframe da página."""
+    """PDF completo, exibido inline no iframe da página (o formulário é enviado para ele)."""
     try:
-        _, _, orgao, codigos = _ler_formulario()
+        _, orgao, codigos = _ler_formulario()
     except ValueError as erro:
         return jsonify(erro=str(erro)), 400
 

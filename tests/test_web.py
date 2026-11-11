@@ -6,6 +6,7 @@ import pytest
 from pypdf import PdfReader
 
 from labels.gerador import ETIQUETAS_POR_PAGINA, MAX_CODIGOS, ORGAO_PADRAO
+from planilhas import ods, xlsx
 
 
 def _ler_pdf(resposta):
@@ -137,10 +138,43 @@ class TestGerar:
         assert r.status_code == 200
 
 
+class TestTokenDeDownload:
+    """O cookie com o token avisa a página que o PDF ficou pronto (reabilita o botão)."""
+
+    def _cookie(self, resposta):
+        return next(
+            (h for h in resposta.headers.getlist("Set-Cookie") if h.startswith("download_pronto=")),
+            None,
+        )
+
+    def test_devolve_token_no_cookie(self, client):
+        r = client.post("/gerar", data={"inicio": "1", "fim": "2", "download_token": "abc123_XY-z"})
+        assert r.status_code == 200
+        cookie = self._cookie(r)
+        assert cookie.startswith("download_pronto=abc123_XY-z;")
+        assert "HttpOnly" not in cookie  # o JS precisa ler
+        assert "SameSite=Lax" in cookie
+
+    @pytest.mark.parametrize("token", ["", "a;b", "<script>", "x" * 65])
+    def test_token_ausente_ou_invalido_nao_gera_cookie(self, client, token):
+        r = client.post("/gerar", data={"inicio": "1", "fim": "2", "download_token": token})
+        assert r.status_code == 200
+        assert self._cookie(r) is None
+
+    def test_erro_nao_gera_cookie(self, client):
+        r = client.post("/gerar", data={"inicio": "9", "fim": "1", "download_token": "abc"})
+        assert r.status_code == 400
+        assert self._cookie(r) is None
+
+    def test_pagina_tem_campo_do_token(self, client):
+        html = client.get("/").get_data(as_text=True)
+        assert 'name="download_token"' in html
+
+
 class TestPreview:
     def test_retorna_pdf_completo_inline(self, client):
         quantidade = ETIQUETAS_POR_PAGINA * 2 + 1
-        r = client.get(f"/preview?inicio=1&fim={quantidade}&orgao=TESTE")
+        r = client.post("/preview", data={"inicio": "1", "fim": str(quantidade), "orgao": "TESTE"})
         assert r.status_code == 200
         assert r.mimetype == "application/pdf"
         assert "attachment" not in r.headers.get("Content-Disposition", "")
@@ -151,21 +185,25 @@ class TestPreview:
 
     def test_igual_ao_pdf_final(self, client):
         dados = {"inicio": "500", "fim": "620", "orgao": "TESTE"}
-        prev = _ler_pdf(client.get("/preview", query_string=dados))
+        prev = _ler_pdf(client.post("/preview", data=dados))
         final = _ler_pdf(client.post("/gerar", data=dados))
         assert [p.extract_text() for p in prev.pages] == [p.extract_text() for p in final.pages]
 
     def test_orgao_vazio_sem_texto(self, client):
-        r = client.get("/preview?inicio=1&fim=2&orgao=")
+        r = client.post("/preview", data={"inicio": "1", "fim": "2", "orgao": ""})
         assert r.status_code == 200
         texto = _texto(_ler_pdf(r))
         assert ORGAO_PADRAO not in texto
         assert "1" in texto and "2" in texto
 
     def test_info_resumo(self, client):
-        r = client.get("/preview/info?inicio=1000&fim=1120")
+        r = client.post("/preview/info", data={"inicio": "1000", "fim": "1120"})
         assert r.status_code == 200
         assert r.get_json() == {"codigos": 121, "paginas": 3}
+
+    @pytest.mark.parametrize("rota", ["/preview", "/preview/info"])
+    def test_aceitam_apenas_post(self, client, rota):
+        assert client.get(rota).status_code == 405
 
     @pytest.mark.parametrize("rota", ["/preview", "/preview/info"])
     @pytest.mark.parametrize(
@@ -178,18 +216,106 @@ class TestPreview:
         ],
     )
     def test_erro_retorna_json(self, client, rota, dados):
-        r = client.get(rota, query_string=dados)
+        r = client.post(rota, data=dados)
         assert r.status_code == 400
         assert r.is_json
         assert r.get_json()["erro"]
 
     def test_pagina_inclui_iframe_e_script(self, client):
         html = client.get("/").get_data(as_text=True)
-        assert 'id="preview-frame"' in html
-        assert 'data-preview-url="/preview"' in html
+        assert 'name="preview-frame"' in html
+        assert 'formaction="/preview#view=FitH"' in html
+        assert 'formtarget="preview-frame"' in html
         assert 'data-preview-info-url="/preview/info"' in html
-        assert "preview-nav" not in html
         assert client.get("/static/preview.js").status_code == 200
+
+
+def _arquivo(conteudo, nome):
+    return (BytesIO(conteudo), nome)
+
+
+class TestPlanilha:
+    def test_pagina_tem_campo_habilitado(self, client):
+        html = client.get("/").get_data(as_text=True)
+        assert 'enctype="multipart/form-data"' in html
+        assert 'name="planilha"' in html
+        assert 'accept=".csv,.txt,.xlsx,.ods"' in html
+        assert "<fieldset class=\"planilha\">" in html  # sem "disabled"
+
+    def test_gerar_com_csv(self, client):
+        r = client.post(
+            "/gerar",
+            data={"orgao": "TESTE", "planilha": _arquivo(b"111\n222\n333\n", "lote-maio.csv")},
+        )
+        assert r.status_code == 200
+        assert "codigos_lote-maio.pdf" in r.headers["Content-Disposition"]
+        reader = _ler_pdf(r)
+        texto = _texto(reader)
+        assert all(c in texto for c in ("111", "222", "333"))
+        assert len(reader.pages[0].images) == 3
+
+    def test_planilha_ignora_intervalo(self, client):
+        r = client.post(
+            "/gerar",
+            data={"inicio": "1", "fim": "50", "planilha": _arquivo(b"777\n", "a.csv")},
+        )
+        reader = _ler_pdf(r)
+        assert len(reader.pages[0].images) == 1
+        assert "777" in _texto(reader)
+
+    def test_gerar_com_xlsx(self, client):
+        conteudo = xlsx(["Código", 12385319, 12385320.0, "000123"])
+        r = client.post("/gerar", data={"planilha": _arquivo(conteudo, "x.xlsx")})
+        assert r.status_code == 200
+        texto = _texto(_ler_pdf(r))
+        assert all(c in texto for c in ("12385319", "12385320", "000123"))
+        assert "Código" not in texto
+
+    def test_gerar_com_ods(self, client):
+        conteudo = ods([12385319, "0007"], linhas_vazias_no_fim=1_000_000)
+        r = client.post("/gerar", data={"planilha": _arquivo(conteudo, "x.ods")})
+        assert r.status_code == 200
+        assert len(_ler_pdf(r).pages[0].images) == 2
+
+    def test_nome_do_pdf_sanitizado(self, client):
+        r = client.post("/gerar", data={"planilha": _arquivo(b"1\n", "Lote de março (final).csv")})
+        assert "codigos_Lote_de_mar_o_final.pdf" in r.headers["Content-Disposition"]
+
+    def test_preview_e_info_com_planilha(self, client):
+        dados = lambda: {"planilha": _arquivo(b"10\n20\n30\n", "a.csv")}  # noqa: E731
+        info = client.post("/preview/info", data=dados())
+        assert info.get_json() == {"codigos": 3, "paginas": 1}
+        prev = client.post("/preview", data=dados())
+        assert prev.mimetype == "application/pdf"
+        assert len(_ler_pdf(prev).pages[0].images) == 3
+
+    @pytest.mark.parametrize(
+        "conteudo, nome, mensagem",
+        [
+            (b"x", "a.pdf", "Formato não suportado"),
+            (b"nao e zip", "a.xlsx", "Não foi possível ler"),
+            (b"\n\n", "a.csv", "Nenhum código"),
+            ("ação\n".encode(), "a.csv", "Linha 1"),
+        ],
+    )
+    def test_erros_da_planilha(self, client, conteudo, nome, mensagem):
+        r = client.post("/preview/info", data={"planilha": _arquivo(conteudo, nome)})
+        assert r.status_code == 400
+        assert mensagem in r.get_json()["erro"]
+
+        r = client.post("/gerar", data={"planilha": _arquivo(conteudo, nome)})
+        assert r.status_code == 400
+        assert mensagem in r.get_data(as_text=True)
+
+    def test_arquivo_grande_demais(self, client):
+        grande = b"1\n" * (3 * 1024 * 1024)  # ~6 MB
+        r = client.post("/preview/info", data={"planilha": _arquivo(grande, "a.csv")})
+        assert r.status_code == 413
+        assert "muito grande" in r.get_json()["erro"]
+
+        r = client.post("/gerar", data={"planilha": _arquivo(grande, "a.csv")})
+        assert r.status_code == 413
+        assert "muito grande" in r.get_data(as_text=True)
 
 
 def test_paginas_calculadas_batem_com_o_pdf():

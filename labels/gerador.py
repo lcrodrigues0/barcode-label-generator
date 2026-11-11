@@ -35,16 +35,140 @@ MAX_CODIGOS = 10_000
 MAX_ORGAO = 40
 
 
+# --------------------------------------------------------------------------
+# Leitura de planilhas (um código por linha, na primeira coluna)
+# --------------------------------------------------------------------------
+
+FORMATOS_PLANILHA = (".csv", ".txt", ".xlsx", ".ods")
+MAX_TAMANHO_CODIGO = 40
+
+_NS_ODS = {
+    "office": "urn:oasis:names:tc:opendocument:xmlns:office:1.0",
+    "table": "urn:oasis:names:tc:opendocument:xmlns:table:1.0",
+}
+_TIPOS_NUMERICOS_ODS = {"float", "percentage", "currency"}
+
+
+def _normalizar_valor(valor):
+    """Converte o valor de uma célula em texto (12385319.0 -> "12385319")."""
+    if valor is None:
+        return ""
+    if isinstance(valor, bool):
+        return str(valor)
+    if isinstance(valor, float) and valor.is_integer():
+        return str(int(valor))
+    return str(valor).strip()
+
+
+def _linhas_texto(conteudo):
+    try:
+        texto = conteudo.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        texto = conteudo.decode("latin-1")
+    try:
+        dialeto = csv.Sniffer().sniff(texto[:4096], delimiters=",;\t")
+    except csv.Error:
+        dialeto = csv.excel  # uma coluna só: não há delimitador para detectar
+    for linha in csv.reader(texto.splitlines(), dialeto):
+        yield linha[0] if linha else ""
+
+
+def _linhas_xlsx(conteudo):
+    import openpyxl
+
+    livro = openpyxl.load_workbook(BytesIO(conteudo), read_only=True, data_only=True)
+    try:
+        for linha in livro.worksheets[0].iter_rows(max_col=1, values_only=True):
+            yield linha[0] if linha else None
+    finally:
+        livro.close()
+
+
+def _linhas_ods(conteudo):
+    import xml.etree.ElementTree as ET
+    import zipfile
+
+    with zipfile.ZipFile(BytesIO(conteudo)) as arquivo:
+        raiz = ET.fromstring(arquivo.read("content.xml"))
+
+    tabela = raiz.find(".//table:table", _NS_ODS)
+    if tabela is None:
+        return
+    t = "{%s}" % _NS_ODS["table"]
+    o = "{%s}" % _NS_ODS["office"]
+    for linha in tabela.iter(f"{t}table-row"):
+        celula = next(
+            (c for c in linha if c.tag in (f"{t}table-cell", f"{t}covered-table-cell")),
+            None,
+        )
+        valor = None
+        if celula is not None:
+            if celula.get(f"{o}value-type") in _TIPOS_NUMERICOS_ODS:
+                valor = float(celula.get(f"{o}value"))
+            else:
+                valor = "".join(celula.itertext())
+        # Linhas repetidas: o LibreOffice grava as linhas vazias do fim assim.
+        repeticoes = int(linha.get(f"{t}number-rows-repeated", "1"))
+        if not _normalizar_valor(valor):
+            repeticoes = 1
+        for _ in range(min(repeticoes, MAX_CODIGOS + 1)):
+            yield valor
+
+
+def _validar_codigos(valores):
+    """Recebe os valores da 1ª coluna, linha a linha, e devolve os códigos válidos."""
+    linhas = [
+        (numero, texto)
+        for numero, texto in enumerate((_normalizar_valor(v) for v in valores), start=1)
+        if texto
+    ]
+
+    # Cabeçalho: 1ª linha com texto e todas as outras só com números.
+    if len(linhas) > 1 and not linhas[0][1].isdigit() and all(t.isdigit() for _, t in linhas[1:]):
+        linhas = linhas[1:]
+
+    if not linhas:
+        raise ValueError("Nenhum código encontrado na planilha.")
+    if len(linhas) > MAX_CODIGOS:
+        raise ValueError(f"A planilha não pode ter mais de {MAX_CODIGOS} códigos.")
+
+    for numero, texto in linhas:
+        if len(texto) > MAX_TAMANHO_CODIGO:
+            raise ValueError(
+                f"Linha {numero}: o código deve ter no máximo {MAX_TAMANHO_CODIGO} caracteres."
+            )
+        if not all(32 <= ord(ch) < 127 for ch in texto):
+            raise ValueError(
+                f"Linha {numero}: o código \"{texto}\" tem caracteres não aceitos "
+                "(use só letras sem acento, números e símbolos comuns)."
+            )
+    return [texto for _, texto in linhas]
+
+
+def ler_codigos_planilha(conteudo, nome_arquivo):
+    """Lê os códigos da 1ª coluna de um .csv, .txt, .xlsx ou .ods (em bytes)."""
+    extensao = Path(nome_arquivo or "").suffix.lower()
+    leitores = {
+        ".csv": _linhas_texto,
+        ".txt": _linhas_texto,
+        ".xlsx": _linhas_xlsx,
+        ".ods": _linhas_ods,
+    }
+    if extensao not in leitores:
+        raise ValueError("Formato não suportado. Use .csv, .txt, .xlsx ou .ods.")
+    try:
+        valores = list(leitores[extensao](conteudo))
+    except Exception as erro:  # arquivo corrompido ou com outro formato
+        raise ValueError(
+            "Não foi possível ler a planilha. Verifique se o arquivo não está corrompido."
+        ) from erro
+    return _validar_codigos(valores)
+
+
 def ler_codigos_csv(caminho_csv):
-    codigos = []
-    with open(caminho_csv, newline="") as csvfile:
-        for linha in csv.reader(csvfile):
-            if not linha:
-                continue
-            codigo = linha[0].strip()
-            if codigo:
-                codigos.append(codigo)
-    return codigos
+    """Lê os códigos de uma planilha em disco (qualquer formato aceito)."""
+    with open(caminho_csv, "rb") as arquivo:
+        return ler_codigos_planilha(arquivo.read(), caminho_csv)
 
 
 def gerar_codigos_intervalo(inicio, fim):
@@ -152,12 +276,13 @@ def gerar_pdf(codigos, destino=PDF_PADRAO, nome_do_orgao=ORGAO_PADRAO):
 
 def _parse_args():
     parser = argparse.ArgumentParser(
-        description="Gera um PDF de etiquetas Code 128 a partir de um CSV ou de um intervalo."
+        description="Gera um PDF de etiquetas Code 128 a partir de uma planilha ou de um intervalo."
     )
     parser.add_argument(
+        "--planilha",
         "--csv",
         dest="csv_path",
-        help="Arquivo CSV com um código por linha (ainda disponível via script).",
+        help="Planilha (.csv, .txt, .xlsx ou .ods) com um código por linha, na 1ª coluna.",
     )
     parser.add_argument("--inicio", help="Primeiro número do intervalo.")
     parser.add_argument("--fim", help="Último número do intervalo.")
@@ -181,7 +306,7 @@ if __name__ == "__main__":
         if not (args.inicio and args.fim):
             raise SystemExit("Informe --inicio e --fim juntos.")
         if args.csv_path:
-            raise SystemExit("Use CSV ou intervalo, não os dois ao mesmo tempo.")
+            raise SystemExit("Use planilha (CSV) ou intervalo, não os dois ao mesmo tempo.")
         try:
             codigos = gerar_codigos_intervalo(args.inicio, args.fim)
         except ValueError as erro:
@@ -189,8 +314,11 @@ if __name__ == "__main__":
     else:
         caminho_csv = args.csv_path or CSV_PADRAO
         if not os.path.exists(caminho_csv):
-            raise SystemExit(f"Arquivo CSV não encontrado: {caminho_csv}")
-        codigos = ler_codigos_csv(caminho_csv)
+            raise SystemExit(f"Arquivo não encontrado: {caminho_csv}")
+        try:
+            codigos = ler_codigos_csv(caminho_csv)
+        except ValueError as erro:
+            raise SystemExit(str(erro))
 
     Path(args.saida).parent.mkdir(parents=True, exist_ok=True)
     try:

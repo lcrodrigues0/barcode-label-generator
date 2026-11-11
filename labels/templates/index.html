@@ -21,7 +21,7 @@
       <p class="alert" role="alert">{{ erro }}</p>
       {% endif %}
 
-      <form id="form-etiquetas" action="{{ url_for('gerar') }}" method="post" data-preview-url="{{ url_for('preview') }}" data-preview-info-url="{{ url_for('preview_info') }}">
+      <form id="form-etiquetas" action="{{ url_for('gerar') }}" method="post" enctype="multipart/form-data" data-preview-info-url="{{ url_for('preview_info') }}">
         <fieldset class="range">
           <legend>Intervalo</legend>
           <label>
@@ -36,31 +36,39 @@
         </fieldset>
 
         <label>
-          Texto do órgão
-          <input type="text" name="orgao" value="{{ orgao_padrao }}" maxlength="{{ max_orgao }}" placeholder="Sem texto acima do código">
+          Texto acima do código
+          <input type="text" name="orgao" value="{{ orgao_padrao }}" maxlength="{{ max_orgao }}" placeholder="Deixe vazio para não imprimir texto">
         </label>
 
-        <fieldset class="csv" disabled>
-          <legend>CSV</legend>
+        <fieldset class="planilha">
+          <legend>Planilha</legend>
           <label>
-            Arquivo CSV
-            <input type="file" accept=".csv" tabindex="-1">
+            Arquivo (.csv, .txt, .xlsx ou .ods)
+            <input type="file" name="planilha" id="campo-planilha" accept="{{ formatos }}">
           </label>
-          <p class="hint">Importação por CSV está desabilitada nesta tela. Use o script com <code>--csv</code> se precisar.</p>
+          <button type="button" id="remover-planilha" class="botao-secundario" hidden>Remover planilha</button>
+          <p class="hint">Um código por linha, na primeira coluna. Com uma planilha, o intervalo fica bloqueado.</p>
         </fieldset>
 
-        <button type="submit">Gerar PDF</button>
+        <input type="hidden" name="download_token" id="download-token">
+        <button type="submit" id="botao-gerar">Gerar PDF</button>
+        <!-- Envia o formulário (com a planilha) para o iframe da prévia; acionado pelo preview.js. -->
+        <button type="submit" id="botao-preview" hidden formaction="{{ url_for('preview') }}#view=FitH" formtarget="preview-frame" formnovalidate tabindex="-1">Atualizar prévia</button>
       </form>
     </main>
 
     <aside class="preview" aria-labelledby="preview-titulo">
       <div class="preview-head">
         <p id="preview-titulo" class="eyebrow">Prévia</p>
-        <p id="preview-resumo" class="preview-resumo" aria-live="polite">Preencha o intervalo para ver as páginas.</p>
+        <p id="preview-resumo" class="preview-resumo" aria-live="polite">Preencha o intervalo ou importe uma planilha.</p>
       </div>
       <div class="preview-folha" data-estado="vazio">
-        <iframe id="preview-frame" title="Prévia do PDF" hidden></iframe>
+        <iframe id="preview-frame" name="preview-frame" title="Prévia do PDF" hidden></iframe>
         <p id="preview-mensagem" class="preview-mensagem">As páginas aparecem aqui.</p>
+        <div class="preview-carregando" role="status">
+          <span class="spinner" aria-hidden="true"></span>
+          <span>Gerando prévia…</span>
+        </div>
       </div>
     </aside>
   </div>
